@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - EcoDisassemble AR</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 2rem; max-width: 800px; margin: 0 auto; background: #121212; color: #fff; }
+        h1, h2 { color: #007bff; }
+        a { color: #007bff; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Policy</h1>
+    <p><strong>Last Updated:</strong> Today</p>
+
+    <h2>1. On-Device Processing</h2>
+    <p>EcoDisassemble AR is built on a strict privacy-first architecture. All camera feeds, images, and videos uploaded into the application are processed <strong>entirely on your device</strong> using local Edge-AI models (ONNX Runtime Web).</p>
+    <p>At no point do your images, videos, or raw visual diagnostics leave your device or transmit to any external server.</p>
+
+    <h2>2. Cloud Sync (Optional)</h2>
+    <p>If you choose to sync your repair inventory, only an extremely restricted, anonymous data payload is sent to our backend. This payload strictly contains:</p>
+    <ul>
+        <li>General Device Model (e.g., "iPhone 12")</li>
+        <li>Repaired Part Name (e.g., "Battery")</li>
+        <li>Quantity</li>
+        <li>Repair Status (e.g., "success")</li>
+    </ul>
+
+    <h2>3. Local Storage</h2>
+    <p>Your repair history and consent preferences are stored locally on your device using IndexedDB. You can clear this data at any time by clearing the application data in your device settings.</p>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "RepairLens — Private Repair Triage",
+  "short_name": "RepairLens",
+  "description": "Privacy-first electronic repair triage prototype.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#07110f",
+  "theme_color": "#07110f",
+  "icons": [
+    {"src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}
