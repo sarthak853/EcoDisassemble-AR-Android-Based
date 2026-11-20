@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">andoird</string>
+    <string name="app_name">EcoDisassemble AR</string>
+    <string name="title_activity_main">EcoDisassemble AR</string>
 </resources>

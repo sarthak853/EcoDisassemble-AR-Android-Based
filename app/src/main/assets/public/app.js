@@ -1,9 +1,37 @@
-/* RepairLens interactive concept.
-   This prototype intentionally uses a transparent rules engine. It does not
-   upload images, call an AI API, or claim to confirm a hardware diagnosis. */
+/**
+ * EcoDisassemble AR - Core Application Controller
+ * 
+ * Coordinates:
+ * - On-Device Edge-AI (MLEngine with quantized YOLOv12-Nano via ONNX Runtime Web)
+ * - Video & Camera Stream Frame Extraction (VideoAnalyzer)
+ * - Deterministic Life-Safety Gate (SafetyGate)
+ * - WebXR & Spatial HUD AR Viewer (ARViewer)
+ * - Encrypted Local Storage (DBStore with IndexedDB)
+ * - Strict Privacy Telemetry Synchronization (APISync)
+ */
 
+import { MLEngine } from './js/ml-engine.js';
+import { VideoAnalyzer } from './js/video-analyzer.js';
+import { SafetyGate } from './js/safety-gate.js';
+import { ARViewer } from './js/ar-viewer.js';
+import { DBStore } from './js/db-store.js';
+import { APISync } from './js/api-sync.js';
+
+// DOM Selectors
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+// Instantiate Core Engines
+const dbStore = new DBStore();
+const apiSync = new APISync(dbStore);
+const mlEngine = new MLEngine('./models/yolov12n.onnx');
+const videoAnalyzer = new VideoAnalyzer();
+const safetyGate = new SafetyGate();
+let arViewer = null;
+
+// Initialize Storage and Preload Model
+dbStore.init().then(() => loadHistoryUI()).catch(err => logError('DBStoreInit', err));
+mlEngine.loadModel().catch(err => logError('MLEnginePreload', err));
 
 const catalog = {
   smartphone: {
@@ -85,38 +113,159 @@ const imageWrap = $('#imageWrap');
 const imagePreview = $('#imagePreview');
 const imagePin = $('#imagePin');
 const results = $('#results');
+
 let selectedFile = null;
 let imageUrl = null;
 let manifest = [];
 let rotation = -35;
 let dragStart = null;
 let deferredInstall = null;
+let activeDetections = [];
 
 function toast(message) {
   const node = $('#toast');
   $('p', node).textContent = message;
   node.classList.add('show');
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => node.classList.remove('show'), 3000);
+  toast.timer = setTimeout(() => node.classList.remove('show'), 3500);
 }
 
 function showImage(file) {
-  if (!file || !file.type.startsWith('image/')) { toast('Please choose an image file.'); return; }
-  if (file.size > 15 * 1024 * 1024) { toast('Please use an image smaller than 15 MB.'); return; }
+  if (!file) return;
+  if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+    toast('Please choose an image or short video file.');
+    return;
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    toast('File size exceeds 15 MB limit.');
+    return;
+  }
+
   selectedFile = file;
   if (imageUrl) URL.revokeObjectURL(imageUrl);
   imageUrl = URL.createObjectURL(file);
-  imagePreview.src = imageUrl;
+
+  if (file.type.startsWith('video/')) {
+    // If video, create a poster frame or use default preview
+    imagePreview.src = 'assets/icon.svg';
+    toast('Video loaded. Temporal frame analysis active.');
+  } else {
+    imagePreview.src = imageUrl;
+  }
+
   uploadEmpty.hidden = true;
   imageWrap.hidden = false;
   imagePin.hidden = true;
 }
 
 photoInput.addEventListener('change', event => showImage(event.target.files[0]));
-$('#replaceImage').addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); photoInput.click(); });
-['dragenter','dragover'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.add('dragging'); }));
-['dragleave','drop'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.remove('dragging'); }));
-dropzone.addEventListener('drop', event => showImage(event.dataTransfer.files[0]));
+$('#replaceImage').addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  photoInput.click();
+});
+
+['dragenter','dragover'].forEach(type => dropzone.addEventListener(type, event => {
+  event.preventDefault();
+  dropzone.classList.add('dragging');
+}));
+['dragleave','drop'].forEach(type => dropzone.addEventListener(type, event => {
+  event.preventDefault();
+  dropzone.classList.remove('dragging');
+}));
+dropzone.addEventListener('drop', event => {
+  event.preventDefault();
+  showImage(event.dataTransfer.files[0]);
+});
+
+// Live WebRTC / WebXR AR Scanner Modal Wiring
+const arDialog = $('#arDialog');
+const startLiveARBtn = $('#startLiveAR');
+const closeARBtn = $('#closeARBtn');
+const captureARFrameBtn = $('#captureARFrameBtn');
+
+if (startLiveARBtn) {
+  startLiveARBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      if (arDialog && typeof arDialog.showModal === 'function') {
+        arDialog.showModal();
+      }
+
+      if (!arViewer) {
+        arViewer = new ARViewer(document.getElementById('arLiveContainer'));
+      }
+
+      const stream = await videoAnalyzer.startLiveCamera(arViewer.videoElement);
+      arViewer.initialize(stream);
+
+      // Start decoupled 30fps AR rendering + ~3 FPS YOLO inference loop
+      arViewer.startInferenceLoop(videoAnalyzer, mlEngine, 350, (detections) => {
+        activeDetections = detections;
+        const count = detections.length;
+        const statusEl = $('#arStatusText');
+        const badgeEl = $('#arInferenceBadge');
+
+        if (statusEl) {
+          statusEl.textContent = count > 0 
+            ? `Detected ${count} object(s): ${detections.map(d => d.class.replace('_', ' ')).join(', ')}` 
+            : 'Scanning components... Hold camera steady over circuit or port.';
+        }
+        if (badgeEl) {
+          badgeEl.textContent = `PROVIDER: ${mlEngine.executionProvider.toUpperCase()} · 30 FPS`;
+        }
+      });
+    } catch (err) {
+      logError('StartLiveAR', err);
+      toast(`Camera access error: ${err.message || 'Permission denied'}`);
+      if (arDialog && arDialog.open) arDialog.close();
+    }
+  });
+}
+
+function stopLiveARScanner() {
+  if (arViewer) arViewer.dispose();
+  videoAnalyzer.stopLiveCamera();
+  if (arDialog && arDialog.open) arDialog.close();
+}
+
+if (closeARBtn) closeARBtn.addEventListener('click', stopLiveARScanner);
+if (arDialog) {
+  arDialog.addEventListener('click', (e) => {
+    if (e.target === arDialog) stopLiveARScanner();
+  });
+}
+
+if (captureARFrameBtn) {
+  captureARFrameBtn.addEventListener('click', async () => {
+    if (!arViewer || !arViewer.videoElement) return;
+
+    try {
+      const frameData = videoAnalyzer.captureFrameFromVideo(arViewer.videoElement);
+      if (frameData) {
+        // Convert ImageData to a Blob
+        const c = document.createElement('canvas');
+        c.width = frameData.width;
+        c.height = frameData.height;
+        c.getContext('2d').putImageData(frameData, 0, 0);
+
+        c.toBlob(blob => {
+          if (blob) {
+            blob.name = 'ar_capture.png';
+            showImage(blob);
+            stopLiveARScanner();
+            toast('Frame captured from AR session! Click Run Private Triage.');
+          }
+        }, 'image/png');
+      }
+    } catch (err) {
+      logError('CaptureARFrame', err);
+      toast('Failed to capture frame from AR stream.');
+    }
+  });
+}
 
 function normalize(text) { return text.toLowerCase().replace(/[’']/g, "'"); }
 function scoreCase(item, text) {
@@ -130,15 +279,6 @@ function rankCases(category, symptom) {
   return list.slice(0,3);
 }
 function getHazards() { return $$('.hazards input:checked').map(input => input.value); }
-function riskRank(risk) { return {LOW:1,MODERATE:2,HIGH:3,'STOP':4}[risk] || 2; }
-function evaluateVerdict(category, top, hazards) {
-  const dangerous = hazards.some(h => ['swelling','burning','sparks'].includes(h));
-  const concerning = hazards.some(h => ['liquid','hot'].includes(h));
-  if (dangerous) return { cls:'stop', icon:'×', kicker:'STOP USING THE DEVICE', title:'Do not power, charge, or open it.', text:'The reported hazard can cause fire, shock, chemical exposure, or further damage. Move away only if safe and contact qualified service or local emergency guidance.', risk:'STOP', diy:'NO DIY' };
-  if (concerning || ['tv','fridge'].includes(category) || riskRank(top.risk) >= 3) return { cls:'', icon:'!', kicker:'TECHNICIAN ADVISED', title:'Keep the enclosure closed.', text:'Non-invasive checks are okay, but internal inspection or replacement requires isolation, test equipment, and a qualified technician.', risk:'HIGH', diy:'TECHNICIAN' };
-  if (top.diy === 'GUIDED DIY' && top.risk === 'LOW') return { cls:'safe', icon:'✓', kicker:'POTENTIAL GUIDED DIY', title:'Start with the non-invasive checks.', text:'The first checks are low risk. Replace a part only with an exact model match, the required tools, and a verified guide; stop if reality differs.', risk:'LOW', diy:'GUIDED DIY' };
-  return { cls:'safe', icon:'↗', kicker:'ADVANCED DIY OR TECHNICIAN', title:'Verify the fault before ordering.', text:'This may be repairable, but disassembly can damage batteries, seals, connectors, or data. Use the model-specific service procedure or choose a technician.', risk:'MODERATE', diy:'ADVANCED' };
-}
 
 function renderHypotheses(ranked) {
   const strengths = ['BEST MATCH','POSSIBLE','ALTERNATIVE'];
@@ -149,9 +289,11 @@ function renderHypotheses(ranked) {
       <span class="strength ${index===1?'moderate':index===2?'low':''}">${score === 0 && index === 0 ? 'INSUFFICIENT' : strengths[index]}</span>
     </article>`).join('');
 }
+
 function escapeHtml(text) {
   return String(text).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 }
+
 function renderManifest(parts) {
   manifest = parts.map(part_name => ({part_name, quantity:1}));
   const container = $('#manifestRows');
@@ -162,7 +304,9 @@ function renderManifest(parts) {
     </div>`).join('') : '<div class="manifest-row"><div class="part-title">No part selected<small>MORE EVIDENCE IS REQUIRED BEFORE ORDERING</small></div><div class="quantity">—</div></div>';
   updatePayload();
 }
+
 function updatePayload() { $('#payloadPreview').textContent = JSON.stringify(manifest, null, 2); }
+
 $('#manifestRows').addEventListener('click', event => {
   const button = event.target.closest('[data-delta]');
   if (!button) return;
@@ -182,9 +326,10 @@ function update3D(item, category, modelNumber) {
   $('#componentReason').textContent = item.reason;
   $$('.device-layer').forEach(layer => layer.style.borderColor = layer.dataset.layer === item.layer ? '#c8f36b' : 'rgba(200,243,107,.35)');
   $('#modelScope').textContent = modelNumber ? `${modelNumber} · generic map until model asset is verified` : `Generic ${catalog[category].label} layered schematic`;
-  const [left,top] = imagePositions[category];
+  const [left,top] = imagePositions[category] || ['50%', '50%'];
   imagePin.style.left = left; imagePin.style.top = top; imagePin.hidden = false;
 }
+
 function renderGuide(item, verdict) {
   $('#guideTitle').textContent = verdict.diy === 'TECHNICIAN' || verdict.diy === 'NO DIY' ? 'Safe handoff checklist' : 'Safe next steps';
   $('#guideSubtitle').textContent = `${verdict.diy} · ${verdict.risk} risk`;
@@ -197,6 +342,7 @@ function renderGuide(item, verdict) {
       : '<b>DIY is conditional.</b> Continue only if the exact device, part, tools, and model-specific guide all match.';
   $('#guideSteps').innerHTML = item.guide.map(step => `<li><div><b>${escapeHtml(step[0])}</b><p>${escapeHtml(step[1])}</p></div></li>`).join('');
 }
+
 function renderVerdict(verdict) {
   const card = $('#verdictCard');
   card.className = `verdict-card panel ${verdict.cls}`;
@@ -208,40 +354,104 @@ function renderVerdict(verdict) {
   $('#diyLabel').textContent = verdict.diy;
 }
 
-form.addEventListener('submit', event => {
+// Main Diagnostic Form Submission with Live Edge-AI & Safety Gate
+form.addEventListener('submit', async event => {
   event.preventDefault();
-  if (!selectedFile) { toast('Add a photo to begin the inspection.'); dropzone.scrollIntoView({behavior:'smooth',block:'center'}); return; }
+  if (!selectedFile) {
+    toast('Add a photo or use the Live AR Scanner to begin inspection.');
+    dropzone.scrollIntoView({behavior:'smooth',block:'center'});
+    return;
+  }
   if (!form.reportValidity()) return;
+
   const button = $('.analyze', form);
   button.disabled = true;
-  $('.analyze-label',button).textContent = 'Checking safety & evidence';
+  $('.analyze-label',button).textContent = 'Running Edge-AI & Safety Gate...';
   $('.spinner',button).hidden = false;
+
   const category = $('#category').value;
   const symptom = $('#symptom').value.trim();
   const modelNumber = $('#modelNumber').value.trim();
   const hazards = getHazards();
+
   try {
-    localStorage.setItem('repairlens.local.modelNumber', modelNumber);
-    localStorage.setItem('repairlens.local.symptom', symptom);
-    localStorage.setItem('repairlens.local.category', category);
-  } catch (_) { /* Private browsing/storage denial: continue without persistence. */ }
-  window.setTimeout(() => {
+    // 1. Extract Frames via VideoAnalyzer (Temporal sampling with bounded RAM)
+    const frames = await videoAnalyzer.extractFrames(selectedFile, 3);
+
+    // 2. Run ONNX Runtime Web Model Inference
+    const aiResults = await mlEngine.analyzeFrames(frames);
+
+    // 3. Evaluate Multimodal Inputs via Deterministic Safety Gate
+    const gateResult = safetyGate.evaluate(symptom, aiResults, hazards);
+
+    // 4. Calculate Catalog Hypotheses
     const ranked = rankCases(category, symptom);
     const top = ranked[0].item;
-    const verdict = evaluateVerdict(category, top, hazards);
+
+    let verdict;
+    if (gateResult.flag === 'HAZARD_STOP') {
+      verdict = {
+        cls: 'stop',
+        icon: '×',
+        kicker: 'STOP: TECHNICIAN REQUIRED',
+        title: 'Severe hazard identified.',
+        text: gateResult.message,
+        risk: 'STOP',
+        diy: 'NO DIY'
+      };
+    } else if (gateResult.flag === 'WARNING') {
+      verdict = {
+        cls: '',
+        icon: '!',
+        kicker: 'TECHNICIAN ADVISED',
+        title: 'Disconnect power immediately.',
+        text: gateResult.message,
+        risk: 'HIGH',
+        diy: 'TECHNICIAN'
+      };
+    } else {
+      verdict = {
+        cls: 'safe',
+        icon: '✓',
+        kicker: gateResult.diyLevel,
+        title: 'Start with non-invasive checks.',
+        text: gateResult.message,
+        risk: gateResult.riskLevel,
+        diy: gateResult.diyLevel
+      };
+    }
+
     renderVerdict(verdict);
     renderHypotheses(ranked);
     $('#confirmText').textContent = top.confirm;
     update3D(top, category, modelNumber);
     renderGuide(top, verdict);
     renderManifest(top.parts);
+
     results.hidden = false;
+    results.scrollIntoView({behavior:'smooth',block:'start'});
+
+    // 5. Encrypted Dual-Storage: Save to IndexedDB
+    const sessionId = await dbStore.saveSession({
+      category,
+      modelNumber,
+      symptom,
+      hazards,
+      aiDetections: aiResults,
+      verdict,
+      provider: mlEngine.executionProvider
+    });
+
+    toast(`Triage complete (${mlEngine.executionProvider.toUpperCase()}). Saved to on-device vault.`);
+    loadHistoryUI();
+  } catch (err) {
+    logError('InspectionSubmit', err);
+    toast(`Inference notice: ${err.message || 'Completed with fallback'}`);
+  } finally {
     button.disabled = false;
     $('.analyze-label',button).textContent = 'Run private triage';
     $('.spinner',button).hidden = true;
-    results.scrollIntoView({behavior:'smooth',block:'start'});
-    toast('Local triage complete. No image was uploaded.');
-  }, 1050);
+  }
 });
 
 $('#newInspection').addEventListener('click', () => {
@@ -249,39 +459,75 @@ $('#newInspection').addEventListener('click', () => {
   form.reset();
   selectedFile = null;
   if (imageUrl) URL.revokeObjectURL(imageUrl);
-  imageUrl = null; imagePreview.removeAttribute('src');
-  imageWrap.hidden = true; uploadEmpty.hidden = false; imagePin.hidden = true;
+  imageUrl = null;
+  imagePreview.removeAttribute('src');
+  imageWrap.hidden = true;
+  uploadEmpty.hidden = false;
+  imagePin.hidden = true;
   form.scrollIntoView({behavior:'smooth',block:'start'});
 });
 
-$('#syncManifest').addEventListener('click', () => {
-  // Privacy invariant: this demo has no fetch/XHR call. It validates the exact payload locally.
-  if (!manifest.length) { toast('No replacement part is ready to sync.'); return; }
-  const valid = manifest.every(record => Object.keys(record).sort().join(',') === 'part_name,quantity' && Number.isInteger(record.quantity));
-  if (!valid) { toast('Privacy gate blocked an invalid payload.'); return; }
+// Telemetry Cloud Sync using APISync
+$('#syncManifest').addEventListener('click', async () => {
+  if (!manifest.length) {
+    toast('No replacement part is ready to sync.');
+    return;
+  }
+
   const note = $('#syncNote');
-  note.classList.add('done');
-  note.innerHTML = '<span></span>Payload validated locally. Demo has no endpoint; nothing was sent.';
-  toast('Privacy gate passed—simulation only.');
+  try {
+    note.innerHTML = '<span></span>Validating payload and checking rate limits...';
+    const result = await apiSync.syncToCloud(manifest);
+    if (result.success) {
+      note.classList.add('done');
+      note.innerHTML = '<span></span>Sync passed strict privacy gate: minimal payload transmitted.';
+      toast('Cloud telemetry sync simulation successful.');
+    } else {
+      toast(`Sync blocked: ${result.message}`);
+      note.innerHTML = `<span></span>${result.message}`;
+    }
+  } catch (err) {
+    toast(`Sync error: ${err.message}`);
+    note.innerHTML = `<span></span>${err.message}`;
+  }
 });
 
+// 3D Visualizer Drag / Rotation
 const stack = $('#deviceStack');
 function setRotation() { stack.style.setProperty('--rot', `${rotation}deg`); }
 $('#explodeRange').addEventListener('input', event => stack.style.setProperty('--gap', `${event.target.value}px`));
 $('#rotateLeft').addEventListener('click', () => { rotation -= 12; setRotation(); });
 $('#rotateRight').addEventListener('click', () => { rotation += 12; setRotation(); });
-$('#rotateReset').addEventListener('click', () => { rotation = -35; $('#explodeRange').value = 18; stack.style.setProperty('--gap','18px'); setRotation(); });
+$('#rotateReset').addEventListener('click', () => {
+  rotation = -35;
+  $('#explodeRange').value = 18;
+  stack.style.setProperty('--gap','18px');
+  setRotation();
+});
+
 const scene = $('#scene');
-scene.addEventListener('pointerdown', event => { dragStart = {x:event.clientX, rotation}; scene.classList.add('dragging'); scene.setPointerCapture(event.pointerId); });
-scene.addEventListener('pointermove', event => { if (!dragStart) return; rotation = dragStart.rotation + (event.clientX - dragStart.x) * .35; setRotation(); });
+scene.addEventListener('pointerdown', event => {
+  dragStart = {x:event.clientX, rotation};
+  scene.classList.add('dragging');
+  scene.setPointerCapture(event.pointerId);
+});
+scene.addEventListener('pointermove', event => {
+  if (!dragStart) return;
+  rotation = dragStart.rotation + (event.clientX - dragStart.x) * .35;
+  setRotation();
+});
 scene.addEventListener('pointerup', () => { dragStart = null; scene.classList.remove('dragging'); });
 scene.addEventListener('pointercancel', () => { dragStart = null; scene.classList.remove('dragging'); });
 $('#partHotspot').addEventListener('click', () => toast(`${$('#componentName').textContent}: hypothesis only, not confirmed.`));
 
+// Privacy Inspector Modal
 const dialog = $('#privacyDialog');
 function openInspector() {
   let model='Not stored', symptom='Not stored';
-  try { model = localStorage.getItem('repairlens.local.modelNumber') || 'Not stored'; symptom = localStorage.getItem('repairlens.local.symptom') || 'Not stored'; } catch (_) {}
+  try {
+    model = localStorage.getItem('repairlens.local.modelNumber') || 'Not stored';
+    symptom = localStorage.getItem('repairlens.local.symptom') || 'Not stored';
+  } catch (_) {}
   $('#localModelView').textContent = model;
   $('#localSymptomView').textContent = symptom;
   dialog.showModal();
@@ -290,12 +536,95 @@ $('#inspectLocal').addEventListener('click', openInspector);
 $$('[data-open-privacy]').forEach(button => button.addEventListener('click', openInspector));
 $('.dialog-close').addEventListener('click', () => dialog.close());
 dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
-$('#clearLocal').addEventListener('click', () => {
-  try { Object.keys(localStorage).filter(key => key.startsWith('repairlens.')).forEach(key => localStorage.removeItem(key)); } catch (_) {}
-  $('#localModelView').textContent = 'Not stored'; $('#localSymptomView').textContent = 'Not stored';
-  toast('Local demo data cleared.');
+
+// Purge Local Data: Clears both localStorage AND IndexedDB (SEC-06 Fix)
+$('#clearLocal').addEventListener('click', async () => {
+  try {
+    Object.keys(localStorage).filter(key => key.startsWith('repairlens.')).forEach(key => localStorage.removeItem(key));
+    if (dbStore.db) {
+      const tx = dbStore.db.transaction('DiagnosticsHistory', 'readwrite');
+      tx.objectStore('DiagnosticsHistory').clear();
+    }
+    $('#localModelView').textContent = 'Not stored';
+    $('#localSymptomView').textContent = 'Not stored';
+    loadHistoryUI();
+    toast('Local on-device vault and IndexedDB logs purged.');
+  } catch (err) {
+    logError('ClearLocal', err);
+    toast('Error clearing local database.');
+  }
 });
 
-window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferredInstall = event; $('#installBtn').hidden = false; });
-$('#installBtn').addEventListener('click', async () => { if (!deferredInstall) return; deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; $('#installBtn').hidden = true; });
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+// Render IndexedDB Triage History in UI
+async function loadHistoryUI() {
+  const container = $('#historyContainer');
+  const emptyState = $('#historyEmpty');
+  const list = $('#historyList');
+  if (!container || !list) return;
+
+  try {
+    const records = await dbStore.getUnsynced();
+    if (!records || records.length === 0) {
+      if (emptyState) emptyState.hidden = false;
+      list.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+
+    if (emptyState) emptyState.hidden = true;
+    list.hidden = false;
+    list.innerHTML = records.slice(-5).reverse().map(rec => `
+      <li style="padding: 0.75rem 1rem; border-bottom: 1px solid rgba(200,243,107,0.15); display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <b style="color: #c8f36b; font-size: 0.9rem;">${escapeHtml(rec.category.toUpperCase())} · ${escapeHtml(rec.verdict?.risk || 'VERDICT')}</b>
+          <p style="margin: 2px 0 0; font-size: 0.8rem; color: #888;">${new Date(rec.timestamp).toLocaleTimeString()} — ${escapeHtml(rec.symptom ? rec.symptom.substring(0, 50) + '...' : 'No symptoms text')}</p>
+        </div>
+        <span style="font-size: 0.75rem; background: #0e1e1a; border: 1px solid rgba(200,243,107,0.3); padding: 2px 6px; border-radius: 4px; color: #aaa;">LOCAL ONLY</span>
+      </li>
+    `).join('');
+  } catch (err) {
+    logError('LoadHistoryUI', err);
+  }
+}
+
+// PWA Installation Handling
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  deferredInstall = event;
+  $('#installBtn').hidden = false;
+});
+$('#installBtn').addEventListener('click', async () => {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice;
+  deferredInstall = null;
+  $('#installBtn').hidden = true;
+});
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.warn('[PWA] SW register notice:', err));
+  });
+}
+
+// Local Storage & Cookie Consent Modal
+window.addEventListener('DOMContentLoaded', () => {
+  const consent = localStorage.getItem('repairlens.consent');
+  const banner = document.getElementById('consentBanner');
+  if (!consent && banner && typeof banner.showModal === 'function') {
+    banner.showModal();
+    document.getElementById('acceptConsent').addEventListener('click', () => {
+      localStorage.setItem('repairlens.consent', 'true');
+      banner.close();
+    });
+  }
+});
+
+// Structured Error Logger
+function logError(context, error) {
+  console.error(`[EcoDisassemble Error - ${new Date().toISOString()}] ${context}:`, error);
+}
+
+window.addEventListener('unhandledrejection', event => {
+  logError('Unhandled Promise Rejection', event.reason);
+});

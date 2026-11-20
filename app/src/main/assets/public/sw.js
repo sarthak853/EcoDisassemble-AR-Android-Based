@@ -1,39 +1,64 @@
-const CACHE_NAME = 'ecodisassemble-cache-v1';
-const urlsToCache = [
-    './',
-    './index.html',
-    './privacy-policy.html',
-    './css/styles.css',
-    './js/app.js',
-    './js/video-analyzer.js',
-    './js/ml-engine.js',
-    './js/safety-gate.js',
-    './js/ar-viewer.js',
-    './js/db-store.js',
-    './js/api-sync.js',
-    'https://aframe.io/releases/1.4.2/aframe.min.js',
-    'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js'
+const CACHE = 'repairlens-v3';
+const MODEL_CACHE = 'ecodisassemble-models-v3';
+
+const ASSETS = [
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './manifest.webmanifest',
+  './assets/icon.svg',
+  './models/yolov12n.onnx',
+  './js/video-analyzer.js',
+  './js/ml-engine.js',
+  './js/safety-gate.js',
+  './js/ar-viewer.js',
+  './js/db-store.js',
+  './js/api-sync.js',
+  './privacy-policy.html'
 ];
 
 self.addEventListener('install', event => {
-    event.waitUntil(
-        caches.open(CACHE_NAME)
-        .then(cache => {
-            console.log('Opened cache');
-            return cache.addAll(urlsToCache);
-        })
-    );
+  event.waitUntil(
+    caches.open(CACHE).then(cache => cache.addAll(ASSETS)).catch(err => {
+      console.warn('[ServiceWorker] Pre-cache partial skip:', err);
+    })
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys => 
+      Promise.all(keys.filter(key => key !== CACHE && key !== MODEL_CACHE).map(key => caches.delete(key)))
+    )
+  );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
-    event.respondWith(
-        caches.match(event.request)
-        .then(response => {
-            // Cache hit - return response
-            if (response) {
-                return response;
-            }
-            return fetch(event.request);
-        })
-    );
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  const isModelAsset = url.pathname.endsWith('.onnx') || url.pathname.endsWith('.glb');
+  const targetCache = isModelAsset ? MODEL_CACHE : CACHE;
+  
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      if (cached) return cached;
+      return fetch(event.request).then(response => {
+        // Only cache successful basic or model responses (preventing opaque quota exhaustion)
+        if (response.status === 200 && (response.type === 'basic' || isModelAsset)) {
+          const copy = response.clone();
+          caches.open(targetCache).then(cache => cache.put(event.request, copy));
+        }
+        return response;
+      }).catch(err => {
+        // Fallback to index.html ONLY for navigation requests
+        if (event.request.mode === 'navigate') {
+          return caches.match('./index.html');
+        }
+        throw err;
+      });
+    })
+  );
 });

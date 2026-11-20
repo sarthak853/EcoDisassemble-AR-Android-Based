@@ -1,15 +1,27 @@
+# Gradle & Android build artifacts
 *.iml
+.gradle/
 .gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
+build/
 /build
+captures/
 /captures
 .externalNativeBuild
 .cxx
+
+# Local configurations & private paths (strictly ignored)
 local.properties
+/local.properties
+.idea/
+/.idea
+*.ipr
+*.iws
+
+# System & OS artifacts
+.DS_Store
+Thumbs.db
+*_C__Users*
+*.log
+
+# Public assets safety
+app/src/main/assets/public/_C__Users*

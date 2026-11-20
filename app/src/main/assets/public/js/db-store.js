@@ -1,86 +1,71 @@
-/**
- * Local Storage Management using IndexedDB
- */
-
-const DB_NAME = 'EcoDisassembleDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'repairs';
-
-let db;
-
-export function initDB() {
+export class DBStore {
+  constructor() {
+    this.dbName = 'EcoDisassembleDB';
+    this.dbVersion = 1;
+    this.db = null;
+  }
+  
+  async init() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-        request.onerror = (event) => {
-            console.error('IndexedDB error:', event.target.error);
-            reject(event.target.error);
-        };
-
-        request.onsuccess = (event) => {
-            db = event.target.result;
-            resolve(db);
-        };
-
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                const store = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-                store.createIndex('date', 'date', { unique: false });
-                store.createIndex('synced', 'synced', { unique: false });
-            }
-        };
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+      request.onupgradeneeded = (e) => {
+        this.db = e.target.result;
+        if (!this.db.objectStoreNames.contains('DiagnosticsHistory')) {
+          const store = this.db.createObjectStore('DiagnosticsHistory', { keyPath: 'id' });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
+        }
+      };
+      request.onsuccess = (e) => {
+        this.db = e.target.result;
+        resolve();
+      };
+      request.onerror = (e) => reject(e);
     });
-}
-
-export function saveRepairSession(data) {
+  }
+  
+  async saveSession(data) {
+    if (!this.db) await this.init();
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-        
-        const payload = {
-            ...data,
-            date: new Date().toISOString(),
-            synced: false
-        };
-
-        const request = store.add(payload);
-
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+      const tx = this.db.transaction('DiagnosticsHistory', 'readwrite');
+      const store = tx.objectStore('DiagnosticsHistory');
+      const record = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        synced: false,
+        ...data
+      };
+      store.add(record);
+      tx.oncomplete = () => resolve(record.id);
+      tx.onerror = (e) => reject(e);
     });
-}
-
-export function getUnsyncedRepairs() {
+  }
+  
+  async getUnsynced() {
+    if (!this.db) await this.init();
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const index = store.index('synced');
-        
-        const request = index.getAll(IDBKeyRange.only(false));
-
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+      const tx = this.db.transaction('DiagnosticsHistory', 'readonly');
+      const store = tx.objectStore('DiagnosticsHistory');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        resolve(request.result.filter(r => !r.synced));
+      };
+      request.onerror = (e) => reject(e);
     });
-}
-
-export function markAsSynced(ids) {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-
-        ids.forEach(id => {
-            const request = store.get(id);
-            request.onsuccess = () => {
-                const data = request.result;
-                if (data) {
-                    data.synced = true;
-                    store.put(data);
-                }
-            };
-        });
-
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
+  }
+  
+  async markSynced(ids) {
+    if (!this.db) await this.init();
+    const tx = this.db.transaction('DiagnosticsHistory', 'readwrite');
+    const store = tx.objectStore('DiagnosticsHistory');
+    ids.forEach(id => {
+      const req = store.get(id);
+      req.onsuccess = () => {
+        if (req.result) {
+            const data = req.result;
+            data.synced = true;
+            store.put(data);
+        }
+      };
     });
+  }
 }

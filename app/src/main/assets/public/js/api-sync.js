@@ -1,85 +1,90 @@
 /**
- * Minimalist API Sync to Supabase
+ * EcoDisassemble AR - Telemetry Cloud Sync (Privacy Gate)
+ * 
+ * Enforces strict on-device data minimization before transmitting
+ * replacement part telemetry to Supabase. Guarantees that photos,
+ * device serials, and diagnostic notes are never sent to the cloud.
  */
-import { getUnsyncedRepairs, markAsSynced } from './db-store.js';
-import { showToast } from './app.js';
 
-// Mocked Supabase URL and Anon Key (would be in env vars in prod)
-const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
-const SUPABASE_KEY = 'YOUR_ANON_KEY';
+export class APISync {
+  constructor(dbStore) {
+    this.dbStore = dbStore;
+    this.endpoint = 'https://jcfucwcgtsgaircsxjgd.supabase.co/rest/v1/telemetry_syncs';
+    this.apiKey = 'sb_publishable_W58bAMFyLMptnUvVeeagnQ_bqpVcaR7';
+    this.lastSyncTime = 0;
+    this.rateLimitInterval = 10000; // 10 second debounce for demo (normally 1 hour in prod)
+    this.maxPayloadBytes = 10240;    // Hard 10KB payload limit
+  }
 
-let isSyncing = false;
+  /**
+   * Validates and transmits the replacement part manifest to Supabase.
+   * 
+   * @param {Array<{ part_name: string, quantity: number }>} manifestData
+   * @returns {Promise<{ success: boolean, message: string }>}
+   */
+  async syncToCloud(manifestData) {
+    // 1. Rate Limiting / Debounce Protection
+    const now = Date.now();
+    if (now - this.lastSyncTime < this.rateLimitInterval) {
+      const waitSec = Math.ceil((this.rateLimitInterval - (now - this.lastSyncTime)) / 1000);
+      throw new Error(`Rate limit active. Please wait ${waitSec}s before syncing again.`);
+    }
+    this.lastSyncTime = now;
 
-export async function syncToCloud() {
-    if (isSyncing) return;
-    
+    // 2. Strict JSON Schema Validation (Privacy Invariant: part_name & quantity only)
+    if (!Array.isArray(manifestData) || manifestData.length === 0) {
+      throw new Error("Invalid payload: expected non-empty array of parts.");
+    }
+
+    const payload = manifestData.map(item => ({
+      part_name: String(item.part_name || 'unknown').substring(0, 120),
+      quantity: Math.max(1, Math.min(99, parseInt(item.quantity, 10) || 1))
+    }));
+
+    // 3. Payload Size Boundary Check
+    const serialized = JSON.stringify(payload);
+    if (new TextEncoder().encode(serialized).length > this.maxPayloadBytes) {
+      throw new Error("Payload size limit exceeded (max 10KB). Too many items.");
+    }
+
+    // 4. Timeouts & Abort Controller
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
+
     try {
-        isSyncing = true;
-        
-        const unsynced = await getUnsyncedRepairs();
-        if (unsynced.length === 0) {
-            showToast('All repairs are already synced.');
-            return;
-        }
+      console.log("[APISync] Transmitting minimized manifest through privacy gate:", payload);
 
-        showToast(`Syncing ${unsynced.length} records to cloud...`);
+      // Live Supabase PostgREST Fetch Call
+      const response = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': this.apiKey,
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ payload }),
+        signal: controller.signal
+      });
 
-        // Format payload to STRICT minimal schema
-        const payload = {
-            device_model: navigator.userAgent, // Mocking device model for now
-            repairs: unsynced.map(r => ({
-                part_name: r.partName || 'Unknown Part',
-                quantity: 1,
-                repair_status: r.status || 'success'
-            }))
-        };
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Supabase API responded with status ${response.status}: ${errorText}`);
+      }
 
-        // Note: This fetch will fail until real Supabase credentials are provided.
-        // Wrapping in try/catch to handle gracefully.
-        try {
-            const response = await fetch(`${SUPABASE_URL}/rest/v1/repair_sync_logs`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                    'Prefer': 'return=minimal'
-                },
-                body: JSON.stringify(payload),
-                // Abort controller for timeout
-                signal: AbortSignal.timeout(10000)
-            });
+      clearTimeout(timeoutId);
 
-            if (!response.ok) {
-                throw new Error(`API Error: ${response.status}`);
-            }
+      // Mark records as synced in IndexedDB
+      if (this.dbStore && typeof this.dbStore.markSynced === 'function') {
+        const unsynced = await this.dbStore.getUnsynced();
+        await this.dbStore.markSynced(unsynced.map(r => r.id));
+      }
 
-            // If successful, mark as synced in IndexedDB
-            const ids = unsynced.map(r => r.id);
-            await markAsSynced(ids);
-            
-            showToast('Sync completed successfully!');
-
-        } catch (networkError) {
-            console.warn('Network or API Error during sync. This is expected without a real backend.', networkError);
-            // Mocking a successful sync for development flow purposes
-            const ids = unsynced.map(r => r.id);
-            await markAsSynced(ids);
-            showToast('Dev Mode: Mock sync completed successfully.');
-        }
-
+      return { success: true, message: `Successfully synchronized ${payload.length} part(s).` };
     } catch (err) {
-        console.error('Sync failed:', err);
-        showToast('Sync failed. Please try again later.');
-    } finally {
-        isSyncing = false;
+      clearTimeout(timeoutId);
+      console.error("[APISync] Network sync notice:", err);
+      return { success: false, message: err.name === 'AbortError' ? 'Sync timed out after 10s.' : err.message };
     }
+  }
 }
-
-// Bind to sync button
-document.addEventListener('DOMContentLoaded', () => {
-    const btnSync = document.getElementById('btn-sync-cloud');
-    if (btnSync) {
-        btnSync.addEventListener('click', syncToCloud);
-    }
-});

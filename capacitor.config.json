@@ -1,5 +1,15 @@
 {
   "appId": "com.ecodisassemble.ar",
   "appName": "EcoDisassemble AR",
-  "webDir": "web-base"
+  "webDir": "web-base",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true,
+    "allowNavigation": ["*"]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  }
 }
