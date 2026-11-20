@@ -1,10 +1,10 @@
 # EcoDisassemble AR — Native Android Application Wrapper
 
-[![Direct APK Download](https://img.shields.io/badge/Download-EcoDisassemble--AR.apk%20(v1.0)-00FF88?style=for-the-badge&logo=android)](apk/EcoDisassemble-AR.apk)
+[![Direct APK Download](https://img.shields.io/badge/Download-EcoDisassemble--AR.apk%20(v1.0)-00FF88?style=for-the-badge&logo=android)](https://github.com/sarthak853/EcoDisassemble-AR-Android-Based/raw/main/apk/EcoDisassemble-AR.apk)
 [![Android Version](https://img.shields.io/badge/Platform-Android%2010%2B%20(API%2029%2B)-00E5FF?style=for-the-badge&logo=android)](https://developer.android.com)
 [![Bridge Architecture](https://img.shields.io/badge/Bridge-Capacitor%203.x%20Java%20Bridge-3B82F6?style=for-the-badge&logo=capacitor)](https://capacitorjs.com)
 [![Graphics Acceleration](https://img.shields.io/badge/Graphics-OpenGL%20ES%203.0%20%2F%20WebGL%202.0-FF3B30?style=for-the-badge&logo=opengl)](https://developer.android.com/ndk/guides/graphics)
-[![Privacy Sandbox](https://img.shields.io/badge/Privacy-100%25%20On--Device%20Sandbox-10B981?style=for-the-badge)](apk/EcoDisassemble-AR.apk)
+[![Privacy Sandbox](https://img.shields.io/badge/Privacy-100%25%20On--Device%20Sandbox-10B981?style=for-the-badge)](https://github.com/sarthak853/EcoDisassemble-AR-Android-Based/raw/main/apk/EcoDisassemble-AR.apk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 > **EcoDisassemble AR (Android)** is the hardened, installable mobile application wrapper for **EcoDisassemble AR**, built with Capacitor 3.x and native Java `BridgeActivity`. Designed for field technicians and university laboratory workstations, it bundles the full client-side WebGL Edge-AI neural runtime and WebXR spatial disassembly reticles into an optimized, offline-first Android application package (APK).
@@ -13,15 +13,30 @@
 
 ## 📲 Direct APK Download & Sideloading
 
-You can install and run the pre-compiled Android package directly on any Android 10+ smartphone:
+You can install and run the pre-compiled Android package directly on any Android 10+ smartphone or tablet:
 
-### [📥 Download EcoDisassemble-AR.apk (v1.0, ~9.9 MB)](apk/EcoDisassemble-AR.apk)
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/sarthak853/EcoDisassemble-AR-Android-Based/raw/main/apk/EcoDisassemble-AR.apk">
+        <img src="https://img.shields.io/badge/📥%20DOWNLOAD%20NOW-EcoDisassemble--AR.apk%20(v1.0)-00FF88?style=for-the-badge&logo=android&logoColor=0B0F19" alt="Download APK" height="42"/>
+      </a>
+      <br/>
+      <sub><b>Binary Size:</b> ~10.4 MB | <b>Release Version:</b> v1.0.0 | <b>Target SDK:</b> Android 10.0+ (API 29–34)</sub>
+    </td>
+  </tr>
+</table>
+
+### 🔗 Download Mirrors:
+* **[📥 Primary Direct Download (.apk)](https://github.com/sarthak853/EcoDisassemble-AR-Android-Based/raw/main/apk/EcoDisassemble-AR.apk)** — *One-click immediate browser download*
+* **[⚡ Fast CDN Mirror](https://raw.githubusercontent.com/sarthak853/EcoDisassemble-AR-Android-Based/main/apk/EcoDisassemble-AR.apk)** — *High-speed raw content delivery network*
+* **[📂 Repository Tree View](apk/EcoDisassemble-AR.apk)** — *Inspect binary file in repository tree*
 
 ### Installation Instructions:
-1. **Download the APK:** Tap the badge above or navigate to [`apk/EcoDisassemble-AR.apk`](apk/EcoDisassemble-AR.apk) on your device.
-2. **Enable Unknown Sources:** If prompted, allow your mobile browser or file manager to install unknown apps (*Settings $\to$ Security $\to$ Install Unknown Apps*).
-3. **Install & Launch:** Tap **Install**, then open **EcoDisassemble AR**.
-4. **Grant Permissions:** Grant the **Camera** permission when prompted to activate real-time circuit board inspection.
+1. **Download the APK:** Tap the **DOWNLOAD NOW** button above or click the [Primary Direct Download Link](https://github.com/sarthak853/EcoDisassemble-AR-Android-Based/raw/main/apk/EcoDisassemble-AR.apk).
+2. **Enable Unknown Sources:** If prompted by Android, allow your mobile browser or file manager to install unknown apps (*Settings $\to$ Security / Privacy $\to$ Install Unknown Apps $\to$ Allow from this source*).
+3. **Install & Launch:** Tap **Install**, then tap **Open** to launch **EcoDisassemble AR**.
+4. **Grant Permissions:** Grant the **Camera** permission when prompted to enable real-time circuit board inspection and AR reticle overlays.
 
 ---
 
